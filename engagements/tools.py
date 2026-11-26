@@ -94,6 +94,16 @@ POSSIBLE_SECRET_OMITTED = (
     "Stop and tell the user now, before any other action, and run doctor for the rest."
 )
 SECRET_WARNINGS_PER_WRITE = 5
+# With ``refuse_secrets`` on, a create or update whose supplied text looks like it holds a
+# credential is refused before anything is written. The refusal names no value and no field.
+SECRET_REFUSED_CODE = "secret_refused"
+SECRET_REFUSED_MESSAGE = (
+    "Nothing was saved: the text looks like it holds a credential (a password, key, token or a "
+    "URL carrying one). Records must never hold secrets. Tell the user, and save the record "
+    "without that value."
+)
+# Argument keys that carry ids or flags the library checks itself, never record text.
+_NOT_RECORD_TEXT = frozenset({"id", "base_rev", "kind", "client", "allow_similar", "op"})
 
 _REASON_TEXT = {
     "record_inactive": "it is inactive",
@@ -119,6 +129,7 @@ class SessionConfig:
     auto_bind: bool = True
     banner: bool = True
     create_default: bool = False  # True only when library_root is the default location
+    refuse_secrets: bool = False  # refuse a create or update whose new text looks like a credential
 
 
 @dataclass
@@ -144,7 +155,8 @@ def _config(session):
         return SessionConfig(**known)
     return SessionConfig(library_root=getattr(config, "library_root", None),
                          auto_bind=getattr(config, "auto_bind", True),
-                         create_default=getattr(config, "create_default", False))
+                         create_default=getattr(config, "create_default", False),
+                         refuse_secrets=getattr(config, "refuse_secrets", False))
 
 
 def _profile(session):
@@ -386,6 +398,50 @@ def _secret_warnings(found):
             entry["section"] = finding["section"]
         entries.append(entry)
     return _bounded(entries)
+
+
+def _supplied_text(value):
+    """Every string a create or update supplies, in argument order, as lines the secret scan reads.
+
+    A section's heading is followed by its body, as in the record, so a key on one line and
+    its value on the next are read together. An update is also judged on the record it
+    would publish (``_refuse_new_secrets``).
+    """
+    if isinstance(value, str):
+        return [value]
+    out = []
+    if isinstance(value, dict):
+        for name, item in value.items():
+            if name not in _NOT_RECORD_TEXT:
+                out.extend(_supplied_text(item))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            out.extend(_supplied_text(item))
+    return out
+
+
+def _refusing(session):
+    return bool(getattr(_config(session), "refuse_secrets", False))
+
+
+def _refuse_secrets(args, session):
+    """Raise ``secret_refused`` when ``refuse_secrets`` is on and the supplied text looks like a credential."""
+    if _refusing(session) and secret_findings("\n".join(_supplied_text(args))):
+        raise EngagementsError(SECRET_REFUSED_CODE, SECRET_REFUSED_MESSAGE, {})
+
+
+def _as_text(data):
+    return data.decode("utf-8", "replace") if isinstance(data, (bytes, bytearray)) else str(data)
+
+
+def _refuse_new_secrets(current, new_data):
+    """``before_write`` for an update: refuse when the record it would publish holds a credential it did not.
+
+    Catches what the arguments alone cannot show: a value assembled across two ops, or one
+    appended under a key already in the record. Nothing has been written yet.
+    """
+    if new_findings(_as_text(current), _as_text(new_data)):
+        raise EngagementsError(SECRET_REFUSED_CODE, SECRET_REFUSED_MESSAGE, {})
 
 
 def _record_text(lib, relpath):
@@ -1608,6 +1664,7 @@ def _create_warning(warning, args, labels):
 
 def _create(args, session, warnings):
     _validate_create(args)
+    _refuse_secrets(args, session)
     lib = _open(session, warnings)
     labels = _config(session).labels
     try:
@@ -1626,6 +1683,7 @@ def _create(args, session, warnings):
 
 def _update(args, session, warnings):
     _validate_update(args)
+    _refuse_secrets(args, session)
     lib = _open(session, warnings)
     discovery = lib.discover()
     matches = [e for e in discovery.entries if e.id == args["id"]]
@@ -1644,7 +1702,8 @@ def _update(args, session, warnings):
     result = writer.update(
         lib, entry.relpath, args["base_rev"], args["source"], args["ops"], kind=entry.kind, expected_id=entry.id,
         profile=_profile(session), clock=session.clock, client_exists=lambda client: client in clients,
-        library_defects=lambda record: lib.library_defects(record, entry.relpath, discovery=discovery))
+        library_defects=lambda record: lib.library_defects(record, entry.relpath, discovery=discovery),
+        before_write=_refuse_new_secrets if _refusing(session) else None)
     _add_warnings(warnings, result.warnings)
     _add_warnings(warnings, _secret_warnings(new_findings(before, _record_text(lib, entry.relpath))))
     return result.data

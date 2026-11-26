@@ -737,3 +737,79 @@ def test_five_hundred_findings_are_one_pass_and_stay_bounded(tmp_path):
     assert len(warnings) == 6
     assert warnings[-1]["omitted"] == 495
     assert set(warnings[-1]) == {"code", "message", "omitted"}
+
+
+# --- refuse_secrets (TeamShift fork): refuse before anything is written -------------------------
+
+
+def refusing_session(tmp_path):
+    root = copy_library(tmp_path)
+    session, _ = make_session(root)
+    session.config.refuse_secrets = True
+    return root, session
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"body": f"Stripe key sk_live_{FAKE}"},
+    {"body": f"password: {FAKE}"},
+    {"properties": {"aliases": [f"api_key={FAKE}"]}},
+    {"source": f"https://user:{FAKE}@example.com/notes"},
+])
+def test_refuse_secrets_refuses_a_create_and_writes_nothing(tmp_path, kwargs):
+    root, session = refusing_session(tmp_path)
+    before = sorted(str(p) for p in root.rglob("*"))
+    result = create_client(session, "Northwind Signs", **kwargs)
+    assert not result["ok"] and result["error"]["code"] == "secret_refused"
+    assert FAKE not in json.dumps(result)
+    assert sorted(str(p) for p in root.rglob("*")) == before
+
+
+def test_refuse_secrets_refuses_an_update_and_keeps_the_record(tmp_path):
+    root, session = refusing_session(tmp_path)
+    created = create_client(session, "Northwind Signs", body="Invoices go to the front desk.")
+    assert created["ok"]
+    path = root / created["data"]["path"]
+    text = path.read_text(encoding="utf-8")
+    for ops in ([{"op": "set_property", "key": "aliases", "values": [f"api_key={FAKE}"]}],
+                [{"op": "append_to_section", "section": "Current work", "text": f"Portal\nclient_secret = {FAKE}"}],
+                [{"op": "replace_section", "section": "Current work", "body": f"Handover\nBearer {FAKE}"}]):
+        result = update(session, created, ops)
+        assert not result["ok"] and result["error"]["code"] == "secret_refused", ops
+        assert FAKE not in json.dumps(result)
+    assert path.read_text(encoding="utf-8") == text
+
+
+def test_refuse_secrets_refuses_a_credential_assembled_in_the_record(tmp_path):
+    root, session = refusing_session(tmp_path)
+    created = create_client(session, "Northwind Signs", body="Invoices go to the front desk.")
+    path = root / created["data"]["path"]
+    text = path.read_text(encoding="utf-8")
+    # across two ops in one update
+    result = update(session, created, [{"op": "replace_section", "section": "Current work", "body": "password:"},
+                                       {"op": "append_to_section", "section": "Current work", "text": f"  {FAKE}"}])
+    assert not result["ok"] and result["error"]["code"] == "secret_refused", result
+    assert path.read_text(encoding="utf-8") == text
+    # a value appended under a key the record already holds
+    keyed = update(session, created, [{"op": "replace_section", "section": "Current work", "body": "Portal password:"}])
+    assert keyed["ok"], keyed
+    text = path.read_text(encoding="utf-8")
+    result = call("engagements_update", {"id": created["data"]["id"], "base_rev": keyed["data"]["new_rev"],
+                                         "source": "chat", "ops": [{"op": "append_to_section", "section": "Current work",
+                                                                     "text": f"  {FAKE}"}]}, session)
+    assert not result["ok"] and result["error"]["code"] == "secret_refused", result
+    assert path.read_text(encoding="utf-8") == text
+    assert FAKE not in json.dumps(result)
+
+
+def test_refuse_secrets_leaves_ordinary_text_alone(tmp_path):
+    _, session = refusing_session(tmp_path)
+    result = create_client(session, "Northwind Signs", body="Ask Jane for the shared drive link.",
+                           properties={"aliases": ["Northwind"]})
+    assert result["ok"] and not secret_warnings(result)
+
+
+def test_without_refuse_secrets_a_credential_is_still_saved_with_a_warning(tmp_path):
+    root = copy_library(tmp_path)
+    session, _ = make_session(root)
+    result = create_client(session, "Northwind Signs", body=f"password: {FAKE}")
+    assert result["ok"] and secret_warnings(result)

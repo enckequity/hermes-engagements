@@ -155,7 +155,49 @@ def resolve_config(host):
         labels[kind] = _label(_setting(host, f"labels.{kind}", DEFAULT_LABELS[kind]), DEFAULT_LABELS[kind])
     return PluginConfig(library_root=root, labels=labels, auto_bind=_as_bool(_setting(host, "auto_bind", True), True),
                         banner=_as_bool(_setting(host, "banner", True), True), create_default=create_default,
+                        refuse_secrets=_as_bool(_setting(host, "refuse_secrets", False), False),
                         problem=problem, default_location=create_default)
+
+
+# --- who may run a slash command ---------------------------------------------------------------
+
+LOCAL_PLATFORMS = frozenset({"cli", "tui", "desktop", "local"})
+COMMAND_REFUSED = "Only an approved sender can use this command."
+
+
+def _norm(value):
+    return str(getattr(value, "value", value) or "").strip().lower()
+
+
+def command_senders(host):
+    """The ``command_senders`` setting as a set of ``platform:user_id`` (a list or comma-separated text)."""
+    value = _setting(host, "command_senders", [])
+    if isinstance(value, str):
+        value = value.split(",")
+    out = set()
+    for item in value if isinstance(value, (list, tuple, set)) else ():
+        platform, sep, user = str(item).strip().partition(":")
+        if sep and platform.strip() and user.strip():
+            out.add(f"{platform.strip().lower()}:{user.strip()}")
+    return out
+
+
+def command_allowed(host, context):
+    """May the caller of ``/client`` or ``/engagements`` run it?
+
+    Open to everyone unless ``restrict_commands`` is on. Then a local session (the host passes a
+    local platform and no source, or a source whose platform is local) may, a messaging sender
+    only when listed in ``command_senders``, and a call without calling context never may.
+    """
+    if not _as_bool(_setting(host, "restrict_commands", False), False):
+        return True
+    platform = _norm(context.get("platform"))
+    source = context.get("source")
+    if source is None or _norm(getattr(source, "platform", "")) == "local":
+        return platform in LOCAL_PLATFORMS
+    user = str(getattr(source, "user_id", "") or "").strip()
+    source_platform = _norm(getattr(source, "platform", ""))
+    return bool(user and source_platform) and f"{source_platform}:{user}" in command_senders(host)
 
 
 # --- state store and session -------------------------------------------------------------------
@@ -553,11 +595,10 @@ _NO_SESSION = ("No session id came with this command, so there is nothing to bin
                "Use the engagements_context tool with an explicit id to read a record, or "
                "engagements_find to look one up.")
 _MISSING_LIBRARY = ("No library exists yet at {root}. It is created the first time the agent uses {entity} tool, "
-                    "or run `hermes engagements init --root <path>` to choose a location.")
-_MISSING_CONFIGURED = ("No library exists at {root}, the configured library_root. Create that folder or run "
-                       "`hermes engagements init --root <path>` to choose a location.")
-_NO_LOCATION = ("No library location is configured. Set library_root to an absolute path or run "
-                "`hermes engagements init --root <path>`.")
+                    "or set the library_root setting to choose a location.")
+_MISSING_CONFIGURED = ("No library exists at {root}, the configured library_root. Create that folder or "
+                       "set library_root to another location.")
+_NO_LOCATION = "No library location is configured. Set library_root to an absolute path."
 
 
 def _who(state, labels):
@@ -586,7 +627,7 @@ def render_state(state, labels, *, read_only=False, stored=None):
         # library could not be read in full, so even one match is not a binding.
         shown = ", ".join(state.unreadable[:3]) + ("..." if len(state.unreadable) > 3 else "")
         lines.append(f"Not bound: one or more records could not be read ({shown}), so the folder match "
-                     "cannot be trusted. Run `hermes engagements doctor` or bind explicitly.")
+                     "cannot be trusted. Run /engagements doctor or bind explicitly.")
     elif state.state == "invalid_binding":
         lines.append("Not bound: the stored binding is no longer valid.")
     elif state.state == "cwd_unsupported":
@@ -744,7 +785,7 @@ def doctor_text(config, limit=DOCTOR_LINE_LIMIT):
     lines = doctor.run_doctor(config.library_root).render_text().splitlines()
     if len(lines) > limit:
         hidden = len(lines) - limit + 1
-        lines = lines[:limit - 1] + [f"... {hidden} more lines. Run `hermes engagements doctor` for the full report."]
+        lines = lines[:limit - 1] + [f"... {hidden} more lines not shown."]
     return "\n".join(lines)
 
 

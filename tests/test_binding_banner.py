@@ -168,7 +168,7 @@ def test_incomplete_discovery_banner_names_the_records_and_binds_nothing():
     assert "Riverbend Dental/Projects/Brand Assets.md" in text
     assert "could not be read" in text
     assert "folder match cannot be trusted" in text
-    assert "hermes engagements doctor" in text and "bind explicitly" in text
+    assert "/engagements doctor" in text and "bind explicitly" in text
     assert "engagements_context" in text and "engagements_update" in text
 
 
@@ -819,7 +819,7 @@ def test_the_unavailable_notice_recommends_only_what_works_without_a_library():
     text = unavailable_text()
     assert "engagements_context" not in text and "engagements_update" not in text
     assert "library_root" in text
-    assert "hermes engagements doctor" in text
+    assert "/engagements doctor" in text
 
 
 def test_the_unavailable_notice_names_the_configured_client_label():

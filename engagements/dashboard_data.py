@@ -35,7 +35,7 @@ _STATUS_ORDER = {"active": 0, None: 1}
 # per id). The notice points at the doctor, which already reports every file that shares an id.
 _DUPLICATE_MESSAGE = (
     "The id '{record_id}' is used by more than one record, so this page cannot tell them apart. "
-    "Give each record its own id, then try again. hermes engagements doctor lists the files that share one."
+    "Give each record its own id, then try again. /engagements doctor lists the files that share one."
 )
 
 # One plain sentence per record the page cannot list. The reason names the defect that keeps the

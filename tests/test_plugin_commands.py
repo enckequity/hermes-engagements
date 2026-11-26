@@ -150,7 +150,7 @@ def test_client_with_no_library_yet_points_to_the_zero_config_path(monkeypatch, 
     _, ctx = registered(monkeypatch, tmp_path)
     for raw in ("", "list"):
         text = client(ctx, raw)
-        assert "No library exists yet" in text and "hermes engagements init" in text
+        assert "No library exists yet" in text and "library_root" in text
     assert not (tmp_path / "hermes-home" / "plugin-data" / "engagements" / "library").exists()
 
 
@@ -221,7 +221,7 @@ def test_engagements_doctor_is_capped_for_a_chat_reply(monkeypatch, tmp_path):
     for index in range(80):
         (root / f"junk-{index}.md").write_text(f"---\nengagements: client\nid: bad id {index}\n---\n", encoding="utf-8")
     lines = ctx.command("engagements", "doctor").splitlines()
-    assert len(lines) <= 60 and "hermes engagements doctor" in lines[-1]
+    assert len(lines) <= 60 and "more lines not shown" in lines[-1]
 
 
 @pytest.mark.parametrize("raw", ["", "help", "doctor now", "list"])
@@ -233,3 +233,41 @@ def test_engagements_without_a_known_subcommand_shows_usage(monkeypatch, tmp_pat
 def test_engagements_doctor_on_a_missing_library_reports_it(monkeypatch, tmp_path):
     _, ctx = registered(monkeypatch, tmp_path, library=tmp_path / "absent")
     assert "library" in ctx.command("engagements", "doctor").lower()
+
+
+# --- restrict_commands (TeamShift fork): who may run /client and /engagements -------------------
+
+
+class _Source:
+    def __init__(self, platform="telegram", user_id="42"):
+        self.platform, self.user_id = platform, user_id
+
+
+@pytest.mark.parametrize("name,raw", [("client", ""), ("client", "list"), ("client", "acme-bakery"),
+                                      ("engagements", "doctor")])
+def test_restrict_commands_refuses_an_unlisted_sender(monkeypatch, tmp_path, name, raw):
+    _, _, ctx = setup(monkeypatch, tmp_path, settings={"restrict_commands": True,
+                                                       "command_senders": ["telegram:777"]})
+    stranger = dict(session_id="s1", platform="telegram", source=_Source(user_id="42"))
+    assert ctx.command(name, raw, **stranger) == "Only an approved sender can use this command."
+    assert ctx.command(name, raw) == "Only an approved sender can use this command.", "no context is refused"
+    # a remote source claiming a local platform is still a stranger
+    assert ctx.command(name, raw, platform="cli", source=_Source(user_id="42")).startswith("Only an approved")
+
+
+def test_restrict_commands_lets_a_listed_sender_and_a_local_session_in(monkeypatch, tmp_path):
+    _, _, ctx = setup(monkeypatch, tmp_path, settings={"restrict_commands": True,
+                                                       "command_senders": "telegram:777, sms:+15550100"})
+    owner = dict(session_id="s1", platform="telegram", source=_Source(user_id="777"))
+    assert "Acme Bakery" in ctx.command("client", "list", **owner)
+    assert "Binding updated." in ctx.command("client", "acme-bakery", **owner)
+    assert "Acme Bakery" in ctx.command("client", "list", session_id="s2", platform="cli", source=None)
+    assert ctx.command("engagements", "doctor", platform="local",
+                       source=_Source(platform="local", user_id="")).startswith("Engagements doctor")
+
+
+def test_restrict_commands_with_no_senders_leaves_only_local_sessions(monkeypatch, tmp_path):
+    _, _, ctx = setup(monkeypatch, tmp_path, settings={"restrict_commands": True})
+    assert ctx.command("client", "list", platform="sms", source=_Source("sms", "+15550100")).startswith(
+        "Only an approved")
+    assert "Acme Bakery" in ctx.command("client", "list", platform="cli")

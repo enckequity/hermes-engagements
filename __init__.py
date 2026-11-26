@@ -100,9 +100,13 @@ def register(ctx):
     ctx.register_hook("on_session_delete", _hook(host, runtime.delete_hook))
 
     def client(raw_args, session_id=None, **kwargs):
+        if not runtime.command_allowed(host, kwargs):
+            return runtime.COMMAND_REFUSED
         return runtime.client_command(host, raw_args, session_id)
 
     def engagements(raw_args, **kwargs):
+        if not runtime.command_allowed(host, kwargs):
+            return runtime.COMMAND_REFUSED
         return runtime.engagements_command(host, raw_args)
 
     ctx.register_command("client", client, description="Show or change the client this session is bound to",
