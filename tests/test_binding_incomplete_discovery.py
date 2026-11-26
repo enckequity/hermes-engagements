@@ -349,7 +349,7 @@ def test_the_client_status_names_the_records_it_could_not_read():
     text = runtime.render_state(state, runtime.DEFAULT_LABELS)
     assert "Not bound" in text
     assert BRAND_ASSETS in text
-    assert "could not be read" in text and "hermes engagements doctor" in text
+    assert "could not be read" in text and "/engagements doctor" in text
 
 
 # --- locations the parser could not produce cleanly ------------------------------------

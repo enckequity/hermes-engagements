@@ -9,7 +9,7 @@ Use this when the user wants to add a client (or, afterwards, a project) to the 
 
 ## Reaching the tools
 
-The tools are `engagements_find`, `engagements_create`, `engagements_context`, `engagements_update` and `engagements_bind`. On stock Hermes they are usually not in your tool list. Call `tool_search` with a query such as `client engagement`, then `tool_describe` for the schema, then `tool_call` with the exact tool name and its arguments. If a tool is listed directly, call it directly. If a call says the tool does not exist, go through `tool_call` before concluding it is missing.
+The tools are `engagements_find`, `engagements_create`, `engagements_context`, `engagements_update` and `engagements_bind`. They are usually not in your tool list. Call `tool_search` with a query such as `client engagement`, then `tool_describe` for the schema, then `tool_call` with the exact tool name and its arguments. If a tool is listed directly, call it directly. If a call says the tool does not exist, go through `tool_call` before concluding it is missing.
 
 Every result is JSON: `{ok, data?, error?, warnings}`. Read `ok` first. On `ok: false`, read `error.code` and `error.message`, tell the user in plain words, and do not retry blindly.
 

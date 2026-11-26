@@ -888,7 +888,7 @@ def _incomplete_text(state, previous, labels=None):
         lead = f"No {who} is bound now" if retiring else "Nothing is bound"
         tail = f" Earlier turns may contain {who} context that no longer applies." if retiring else ""
         return (f"[Engagements] {lead}: one or more records could not be read ({_quote(paths)}{more}), so the folder "
-                f"match cannot be trusted. Run `hermes engagements doctor` or bind explicitly.{tail} "
+                f"match cannot be trusted. Run /engagements doctor or bind explicitly.{tail} "
                 f"{_QUOTED_NOTE} {_TOOLS}")
 
     # The label appears twice, so it is fitted with the paths: a configured label is allowed to
@@ -989,6 +989,6 @@ def unavailable_text(labels=None):
         who = _data_text(who) or "client"
         return (f"[Engagements] No {who} is bound now: the library could not be read, so the earlier binding cannot "
                 f"be confirmed. Earlier turns may contain {who} context that no longer applies. Check the "
-                "library_root setting, then run `hermes engagements doctor`.")
+                "library_root setting, then run /engagements doctor.")
 
     return _fit(build_unavailable, {"who": _prose(labels, "client")})

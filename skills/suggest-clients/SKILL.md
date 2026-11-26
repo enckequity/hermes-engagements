@@ -9,7 +9,7 @@ Use this when the user asks you to suggest clients, or when the Clients page's "
 
 ## Reaching the tools
 
-`session_search` is a stock Hermes tool and is usually in your tool list already; call it directly. The Engagements tools are `engagements_find`, `engagements_context`, `engagements_create` and `engagements_update`. On stock Hermes they are usually not in your tool list. Call `tool_search` with a query such as `client engagement`, then `tool_describe` for the schema, then `tool_call` with the exact tool name and its arguments. If a tool is listed directly, call it directly. If a call says the tool does not exist, go through `tool_call` before concluding it is missing.
+`session_search` is a built-in tool and is usually in your tool list already; call it directly. The Engagements tools are `engagements_find`, `engagements_context`, `engagements_create` and `engagements_update`. They are usually not in your tool list. Call `tool_search` with a query such as `client engagement`, then `tool_describe` for the schema, then `tool_call` with the exact tool name and its arguments. If a tool is listed directly, call it directly. If a call says the tool does not exist, go through `tool_call` before concluding it is missing.
 
 Every Engagements result is JSON: `{ok, data?, error?, warnings}`. Read `ok` first. On `ok: false`, read `error.code` and `error.message`, tell the user in plain words, and do not retry blindly.
 

@@ -2,7 +2,7 @@ name: engagements
 version: 1.0.0-rc1
 manifest_version: 2
 requires_hermes: ">=0.22.3"
-description: Hermes is a powerful tool for shipping work to clients, no matter the industry or vertical. Engagements gives it a client notebook. Add a client or project from the Clients page or by pasting notes, approve the draft, and every agent working for that client can look up who to contact, how they like to work and where the files live.
+description: A client and project notebook. Add a client or project by pasting notes, approve the draft, and every agent working for that client can look up who to contact, how they like to work and where the files live.
 author: Hopewell MSP
 license: MIT
 python_dependencies:
@@ -35,3 +35,15 @@ config_schema:
     type: bool
     default: true
     description: "Tell the model which client the session is bound to when that changes."
+  refuse_secrets:
+    type: bool
+    default: false
+    description: "Refuse a create or update whose text looks like it holds a credential, instead of saving it with a warning."
+  restrict_commands:
+    type: bool
+    default: false
+    description: "Let only local sessions and the senders in command_senders use /client and /engagements."
+  command_senders:
+    type: list
+    default: []
+    description: "Messaging senders allowed to use /client and /engagements when restrict_commands is on, as platform:user_id."

@@ -35,7 +35,8 @@ def test_manifest_is_v2_and_declares_what_register_registers(monkeypatch, tmp_pa
 
 def test_manifest_settings_cover_spec_6_1(manifest):
     schema = manifest["config_schema"]
-    assert set(schema) == {"library_root", "labels", "auto_bind", "banner"}
+    assert set(schema) == {"library_root", "labels", "auto_bind", "banner", "refuse_secrets", "restrict_commands",
+                           "command_senders"}
     assert schema["library_root"]["default"] == ""
     assert schema["labels"]["default"] == {"client": "Client", "project": "Project"}
     assert schema["auto_bind"] == {**schema["auto_bind"], "type": "bool", "default": True}

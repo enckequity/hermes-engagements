@@ -94,6 +94,16 @@ POSSIBLE_SECRET_OMITTED = (
     "Stop and tell the user now, before any other action, and run doctor for the rest."
 )
 SECRET_WARNINGS_PER_WRITE = 5
+# With ``refuse_secrets`` on, a create or update whose supplied text looks like it holds a
+# credential is refused before anything is written. The refusal names no value and no field.
+SECRET_REFUSED_CODE = "secret_refused"
+SECRET_REFUSED_MESSAGE = (
+    "Nothing was saved: the text looks like it holds a credential (a password, key, token or a "
+    "URL carrying one). Records must never hold secrets. Tell the user, and save the record "
+    "without that value."
+)
+# Argument keys that carry ids or flags the library checks itself, never record text.
+_NOT_RECORD_TEXT = frozenset({"id", "base_rev", "kind", "client", "allow_similar", "op"})
 
 _REASON_TEXT = {
     "record_inactive": "it is inactive",
@@ -119,6 +129,7 @@ class SessionConfig:
     auto_bind: bool = True
     banner: bool = True
     create_default: bool = False  # True only when library_root is the default location
+    refuse_secrets: bool = False  # refuse a create or update whose new text looks like a credential
 
 
 @dataclass
@@ -144,7 +155,8 @@ def _config(session):
         return SessionConfig(**known)
     return SessionConfig(library_root=getattr(config, "library_root", None),
                          auto_bind=getattr(config, "auto_bind", True),
-                         create_default=getattr(config, "create_default", False))
+                         create_default=getattr(config, "create_default", False),
+                         refuse_secrets=getattr(config, "refuse_secrets", False))
 
 
 def _profile(session):
@@ -386,6 +398,40 @@ def _secret_warnings(found):
             entry["section"] = finding["section"]
         entries.append(entry)
     return _bounded(entries)
+
+
+def _supplied_text(value, key=None):
+    """The text a create or update supplies, as lines the secret scan reads.
+
+    Each string is scanned as written and, under its argument key, as ``key: value``,
+    so a property named like a credential is caught the same way a saved record's
+    frontmatter would be.
+    """
+    if isinstance(value, str):
+        lines = [value]
+        if isinstance(key, str):
+            lines.append(f"{key}: {value}")
+        return lines
+    out = []
+    if isinstance(value, dict):
+        for name, item in value.items():
+            if name in _NOT_RECORD_TEXT:
+                continue
+            if isinstance(name, str):
+                out.append(name)
+            out.extend(_supplied_text(item, name))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            out.extend(_supplied_text(item, key))
+    return out
+
+
+def _refuse_secrets(args, session):
+    """Raise ``secret_refused`` when ``refuse_secrets`` is on and the supplied text looks like a credential."""
+    if not getattr(_config(session), "refuse_secrets", False):
+        return
+    if secret_findings("\n".join(_supplied_text(args))):
+        raise EngagementsError(SECRET_REFUSED_CODE, SECRET_REFUSED_MESSAGE, {})
 
 
 def _record_text(lib, relpath):
@@ -1608,6 +1654,7 @@ def _create_warning(warning, args, labels):
 
 def _create(args, session, warnings):
     _validate_create(args)
+    _refuse_secrets(args, session)
     lib = _open(session, warnings)
     labels = _config(session).labels
     try:
@@ -1626,6 +1673,7 @@ def _create(args, session, warnings):
 
 def _update(args, session, warnings):
     _validate_update(args)
+    _refuse_secrets(args, session)
     lib = _open(session, warnings)
     discovery = lib.discover()
     matches = [e for e in discovery.entries if e.id == args["id"]]
