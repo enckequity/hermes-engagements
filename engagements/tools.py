@@ -403,8 +403,9 @@ def _secret_warnings(found):
 def _supplied_text(value):
     """Every string a create or update supplies, in argument order, as lines the secret scan reads.
 
-    Argument order follows record order (a section's heading, then its body), so a key
-    on one line and its value on the next are read together as the record would hold them.
+    A section's heading is followed by its body, as in the record, so a key on one line and
+    its value on the next are read together. An update is also judged on the record it
+    would publish (``_refuse_new_secrets``).
     """
     if isinstance(value, str):
         return [value]
