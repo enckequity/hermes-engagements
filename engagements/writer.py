@@ -788,7 +788,7 @@ def _validate_arguments(base_rev, source, ops, kind, profile):
 def update(root, path, base_rev, source, ops, *, kind, profile, clock, client_exists,
            library_defects: Callable[[records.Record], Collection[str]] | None = None,
            expected_id: str | None = None,
-           lock_timeout=LOCK_TIMEOUT, before_final_rehash=None, after_final_rehash=None):
+           lock_timeout=LOCK_TIMEOUT, before_final_rehash=None, after_final_rehash=None, before_write=None):
     """Apply ``ops`` to one record in one revision-checked transaction.
 
     Implements spec 5.3 steps 1 to 7 with TOOLS.md "Error precedence" stages 1
@@ -808,6 +808,10 @@ def update(root, path, base_rev, source, ops, *, kind, profile, clock, client_ex
     file is fsynced and before the target is re-hashed, ``after_final_rehash``
     between the re-hash and ``os.replace`` (the window spec 5.5 admits).
 
+    ``before_write(current, new_data)``, when given, sees the locked bytes and the
+    bytes the update would publish, after the ops apply in memory and before the
+    history copy; an ``EngagementsError`` it raises aborts with nothing written.
+
     Returns an ``UpdateResult``. Failures are ``EngagementsError``; a failure
     after the replace becomes a ``maintenance_warning`` in the result.
     """
@@ -820,7 +824,8 @@ def update(root, path, base_rev, source, ops, *, kind, profile, clock, client_ex
         with _open_record_dir(root_path, top, parts, relative) as directory:
             record_id, outcome = _update_held(root_path, top, directory, name, relative, base_rev, source, ops,
                                               kind, expected_id, profile, clock, client_exists, library_defects,
-                                              lock_timeout, before_final_rehash, after_final_rehash, warnings)
+                                              lock_timeout, before_final_rehash, after_final_rehash, warnings,
+                                              before_write)
         new_data, new_rev, rebased = outcome
         try:
             snapshot_problem = _write_snapshot(root_path, top, new_data, new_rev, clock)
@@ -842,7 +847,7 @@ def update(root, path, base_rev, source, ops, *, kind, profile, clock, client_ex
 
 
 def _update_held(root, top, directory, name, relative, base_rev, source, ops, kind, expected_id, profile, clock,
-                 client_exists, library_defects, lock_timeout, before_hook, after_hook, warnings):
+                 client_exists, library_defects, lock_timeout, before_hook, after_hook, warnings, before_write=None):
     """Stages 4 to 8 with the root and the record's directory held. Returns ``(record_id, outcome)``."""
     # Stage 4 on the pre-lock read: needed for the record id (the lock name).
     pre, _ = _read(root, directory, name, relative)
@@ -869,7 +874,7 @@ def _update_held(root, top, directory, name, relative, base_rev, source, ops, ki
     try:
         outcome = _locked_update(root, top, directory, name, relative, record_id, pre, pre_record, base_rev, source,
                                  ops, kind, expected_id, profile, clock, client_exists, library_defects, before_hook,
-                                 after_hook, warnings)
+                                 after_hook, warnings, before_write)
     except BaseException:
         with contextlib.suppress(EngagementsError):
             lock.__exit__(None, None, None)  # the original error wins
@@ -882,7 +887,7 @@ def _update_held(root, top, directory, name, relative, base_rev, source, ops, ki
 
 
 def _locked_update(root, top, directory, name, relative, record_id, pre, pre_record, base_rev, source, ops, kind,
-                   expected_id, profile, clock, client_exists, library_defects, before_hook, after_hook, warnings):
+                   expected_id, profile, clock, client_exists, library_defects, before_hook, after_hook, warnings, before_write=None):
     """Everything that runs while the record lock is held (spec 5.3 steps 2 to 6)."""
     # Step 2 and stage 4 again, against the locked bytes, before the revision check.
     current, mode = _read(root, directory, name, relative)
@@ -925,6 +930,8 @@ def _locked_update(root, top, directory, name, relative, record_id, pre, pre_rec
         if exc.code == "malformed" and isinstance(exc.details, dict) and "path" not in exc.details:
             exc.details = {"path": relative, **exc.details}
         raise
+    if before_write is not None:
+        before_write(current, new_data)
 
     # Step 5: the pre-update history copy. A failure here aborts before the replace.
     stamp = clock().astimezone(UTC).strftime("%Y%m%dT%H%M%S.%fZ")

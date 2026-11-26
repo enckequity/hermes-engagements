@@ -400,37 +400,46 @@ def _secret_warnings(found):
     return _bounded(entries)
 
 
-def _supplied_text(value, key=None):
-    """The text a create or update supplies, as lines the secret scan reads.
+def _supplied_text(value):
+    """Every string a create or update supplies, in argument order, as lines the secret scan reads.
 
-    Each string is scanned as written and, under its argument key, as ``key: value``,
-    so a property named like a credential is caught the same way a saved record's
-    frontmatter would be.
+    Argument order follows record order (a section's heading, then its body), so a key
+    on one line and its value on the next are read together as the record would hold them.
     """
     if isinstance(value, str):
-        lines = [value]
-        if isinstance(key, str):
-            lines.append(f"{key}: {value}")
-        return lines
+        return [value]
     out = []
     if isinstance(value, dict):
         for name, item in value.items():
-            if name in _NOT_RECORD_TEXT:
-                continue
-            if isinstance(name, str):
-                out.append(name)
-            out.extend(_supplied_text(item, name))
+            if name not in _NOT_RECORD_TEXT:
+                out.extend(_supplied_text(item))
     elif isinstance(value, (list, tuple)):
         for item in value:
-            out.extend(_supplied_text(item, key))
+            out.extend(_supplied_text(item))
     return out
+
+
+def _refusing(session):
+    return bool(getattr(_config(session), "refuse_secrets", False))
 
 
 def _refuse_secrets(args, session):
     """Raise ``secret_refused`` when ``refuse_secrets`` is on and the supplied text looks like a credential."""
-    if not getattr(_config(session), "refuse_secrets", False):
-        return
-    if secret_findings("\n".join(_supplied_text(args))):
+    if _refusing(session) and secret_findings("\n".join(_supplied_text(args))):
+        raise EngagementsError(SECRET_REFUSED_CODE, SECRET_REFUSED_MESSAGE, {})
+
+
+def _as_text(data):
+    return data.decode("utf-8", "replace") if isinstance(data, (bytes, bytearray)) else str(data)
+
+
+def _refuse_new_secrets(current, new_data):
+    """``before_write`` for an update: refuse when the record it would publish holds a credential it did not.
+
+    Catches what the arguments alone cannot show: a value assembled across two ops, or one
+    appended under a key already in the record. Nothing has been written yet.
+    """
+    if new_findings(_as_text(current), _as_text(new_data)):
         raise EngagementsError(SECRET_REFUSED_CODE, SECRET_REFUSED_MESSAGE, {})
 
 
@@ -1692,7 +1701,8 @@ def _update(args, session, warnings):
     result = writer.update(
         lib, entry.relpath, args["base_rev"], args["source"], args["ops"], kind=entry.kind, expected_id=entry.id,
         profile=_profile(session), clock=session.clock, client_exists=lambda client: client in clients,
-        library_defects=lambda record: lib.library_defects(record, entry.relpath, discovery=discovery))
+        library_defects=lambda record: lib.library_defects(record, entry.relpath, discovery=discovery),
+        before_write=_refuse_new_secrets if _refusing(session) else None)
     _add_warnings(warnings, result.warnings)
     _add_warnings(warnings, _secret_warnings(new_findings(before, _record_text(lib, entry.relpath))))
     return result.data

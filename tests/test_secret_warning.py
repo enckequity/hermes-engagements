@@ -779,6 +779,28 @@ def test_refuse_secrets_refuses_an_update_and_keeps_the_record(tmp_path):
     assert path.read_text(encoding="utf-8") == text
 
 
+def test_refuse_secrets_refuses_a_credential_assembled_in_the_record(tmp_path):
+    root, session = refusing_session(tmp_path)
+    created = create_client(session, "Northwind Signs", body="Invoices go to the front desk.")
+    path = root / created["data"]["path"]
+    text = path.read_text(encoding="utf-8")
+    # across two ops in one update
+    result = update(session, created, [{"op": "replace_section", "section": "Current work", "body": "password:"},
+                                       {"op": "append_to_section", "section": "Current work", "text": f"  {FAKE}"}])
+    assert not result["ok"] and result["error"]["code"] == "secret_refused", result
+    assert path.read_text(encoding="utf-8") == text
+    # a value appended under a key the record already holds
+    keyed = update(session, created, [{"op": "replace_section", "section": "Current work", "body": "Portal password:"}])
+    assert keyed["ok"], keyed
+    text = path.read_text(encoding="utf-8")
+    result = call("engagements_update", {"id": created["data"]["id"], "base_rev": keyed["data"]["new_rev"],
+                                         "source": "chat", "ops": [{"op": "append_to_section", "section": "Current work",
+                                                                     "text": f"  {FAKE}"}]}, session)
+    assert not result["ok"] and result["error"]["code"] == "secret_refused", result
+    assert path.read_text(encoding="utf-8") == text
+    assert FAKE not in json.dumps(result)
+
+
 def test_refuse_secrets_leaves_ordinary_text_alone(tmp_path):
     _, session = refusing_session(tmp_path)
     result = create_client(session, "Northwind Signs", body="Ask Jane for the shared drive link.",
